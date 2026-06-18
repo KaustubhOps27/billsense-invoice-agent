@@ -1,0 +1,622 @@
+{
+  "name": "BillSense Backend",
+  "nodes": [
+    {
+      "parameters": {
+        "text": "={{ $json.text }}",
+        "attributes": {
+          "attributes": [
+            {
+              "name": "vendor_name",
+              "description": "Output ONLY valid, raw JSON. Do NOT wrap your response in ```json or any markdown. Do NOT include any explanations, thoughts, or inline comments (no //). Extract the official name of the billing company.\n",
+              "required": true
+            },
+            {
+              "name": "invoice_number",
+              "description": "The unique invoice ID or bill number.",
+              "required": true
+            },
+            {
+              "name": "orignal_amount",
+              "type": "number",
+              "description": "The grand total amount on the invoice.",
+              "required": true
+            },
+            {
+              "name": "gst_amount",
+              "type": "number",
+              "description": "Look carefully for GST, CGST, SGST, or IGST line items. Output the total combined tax amount. If no tax is charged, output 0.\n",
+              "required": true
+            },
+            {
+              "name": "date",
+              "description": "The billing or issue date of the invoice.",
+              "required": true
+            },
+            {
+              "name": "currency_code",
+              "description": "Translate the currency symbol into its 3-letter ISO code. Output ONLY the 3-letter code. Do NOT add any explanations, assumptions, or comments next to the code.",
+              "required": true
+            },
+            {
+              "name": "fraud_flag",
+              "type": "boolean",
+              "description": "={{ $json.gst_amount > 0 && !$json.vendor_gstin ? true : false }}\n\n\n",
+              "required": true
+            },
+            {
+              "name": "fraud_reason",
+              "description": "={{ $json.gst_amount > 0 && !$json.vendor_gstin ? \"Tax of ₹\" + $json.gst_amount + \" charged, but no valid GSTIN is present on the document.\" : \"\" }}\n\n"
+            },
+            {
+              "name": "vendor_gstin",
+              "description": "Extract the 15-character alphanumeric GST Number. If it is not explicitly printed on the invoice, you MUST output an empty string \"\". Do not output \"N/A\" or \"None\".\n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        256,
+        768
+      ],
+      "id": "67906c74-d211-466a-b5ca-9f48dcdaf14c",
+      "name": "Information Extractor"
+    },
+    {
+      "parameters": {
+        "model": "llama3.1:latest",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        328,
+        992
+      ],
+      "id": "01f6e446-c3e7-4043-8e96-85371cd59ae2",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "lEPswd5nv05WrIcp",
+          "name": "Ollama account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "file",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        768
+      ],
+      "id": "bd5a15e4-e7e2-4c8c-a912-169c5480a72b",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n \n  const extractedData = $(\"Information Extractor\").item.json.output;\n  \n\n  const rate = item.json.rates.INR;\n  \n\n  const calculatedTotal = extractedData.orignal_amount * rate;\n  const calculatedGst = extractedData.gst_amount * rate;\n  \n  \n  item.json = {\n    ...extractedData,\n    exchange_rate_used: rate,\n    total_amount_inr: calculatedTotal,\n    total_gst_inr: calculatedGst\n  };\n}\n\nreturn $input.all();\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        576
+      ],
+      "id": "d23b8074-a6b3-4727-8b03-cc62d16cac79",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-upload",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -192,
+        768
+      ],
+      "id": "05ac30b8-1b60-4273-b15c-f6828a517a17",
+      "name": "BillSense Streamlit",
+      "webhookId": "2083d53a-d4c1-4d5c-a55c-90679b027076"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "fadf5130-3fdf-4c32-bcc0-789e9864b49a",
+              "leftValue": "={{ $json.output.currency_code }}",
+              "rightValue": "INR",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        608,
+        768
+      ],
+      "id": "27d30a70-155a-4336-a696-e6e65eab5a2b",
+      "name": "IF Currency Code != INR"
+    },
+    {
+      "parameters": {
+        "url": "=https://open.er-api.com/v6/latest/{{ $json.output.currency_code }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        832,
+        576
+      ],
+      "id": "1e51ef0c-e224-465a-8183-3a30b837aefd",
+      "name": "Currency Conversion"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1b07b160-bcf2-4337-8e1a-705b37b6a2db",
+              "leftValue": "={{ $json.output.fraud_flag }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1280,
+        576
+      ],
+      "id": "3fb1f9e5-19b5-4746-a9bc-18959fc6cd0f",
+      "name": "IF fraud_flag == False"
+    },
+    {
+      "parameters": {
+        "sendTo": "kaustubhnikam2710@gmail.com",
+        "subject": "BillSense Automation: Invoice Summary Attached",
+        "emailType": "text",
+        "message": "=Hi Kaustubh,  \nA new invoice has just been processed by BillSense and successfully logged in the spreadsheet.  Here is the quick summary: \n• Vendor Name: {{ $('IF Currency Code != INR').item.json.output.vendor_name }}\n• Invoice Number: {{ $('IF Currency Code != INR').item.json.output.invoice_number }}\n• Total Amount (In INR): {{ $json.total_amount_inr.toFixed(2) }}\n• GST Applied (In INR): {{ $json.total_gst_inr.toFixed(2) }}\nCheck the Google Sheet for the full breakdown.\n\nRegards,\nBillSense",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1504,
+        672
+      ],
+      "id": "b497180b-34dc-49de-9606-d521371e402c",
+      "name": "Send Data Summary",
+      "webhookId": "db153c0d-cb68-47b5-8615-992efa43f430",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "FQhM33z1nX1iwAwr",
+          "name": "TEST"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "kaustubhnikam2710@gmail.com",
+        "subject": "BillSense Automation: Invoice Summary Attached",
+        "emailType": "text",
+        "message": "=Hi Kaustubh,  \nA new invoice has just been processed by BillSense and successfully logged in the spreadsheet.  Here is the quick summary: \n• Vendor Name:{{ $('Information Extractor').item.json.output.vendor_name }}\n• Invoice Number: {{ $('Information Extractor').item.json.output.invoice_number }}\n• Total Amount (In INR): {{ $('Information Extractor').item.json.output.orignal_amount }}\n• GST Applied (In INR): {{ $('Information Extractor').item.json.output.gst_amount }} \nCheck the Google Sheet for the full breakdown.\n\nRegards,\nBillSense",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1056,
+        960
+      ],
+      "id": "116eb816-8819-44bb-be88-30c077800321",
+      "name": "Send Data Summary I",
+      "webhookId": "db153c0d-cb68-47b5-8615-992efa43f430",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "FQhM33z1nX1iwAwr",
+          "name": "TEST"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "18Lg_-ndOHpTRDQ1uaCjU_ku8qhrsaYoVO-2wNyRU_Hs",
+          "mode": "list",
+          "cachedResultName": "Invoice Agent",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18Lg_-ndOHpTRDQ1uaCjU_ku8qhrsaYoVO-2wNyRU_Hs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18Lg_-ndOHpTRDQ1uaCjU_ku8qhrsaYoVO-2wNyRU_Hs/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "VendorName": "={{ $('Information Extractor').item.json.output.vendor_name }}",
+            "InvoiceNumber": "={{ $('Information Extractor').item.json.output.invoice_number }}",
+            "Date ": "={{ $('Information Extractor').item.json.output.date }}",
+            "Amount": "={{ $('Information Extractor').item.json.output.orignal_amount }}",
+            "GST": "={{ $('Information Extractor').item.json.output.gst_amount }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "VendorName",
+              "displayName": "VendorName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "InvoiceNumber",
+              "displayName": "InvoiceNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date ",
+              "displayName": "Date ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Amount",
+              "displayName": "Amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "GST",
+              "displayName": "GST",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1056,
+        768
+      ],
+      "id": "e5293b9a-2fdf-47af-9c7b-7250a1488c15",
+      "name": "Logged into Sheets I",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "kRcYBUesFEiXSyTl",
+          "name": "TEST"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "18Lg_-ndOHpTRDQ1uaCjU_ku8qhrsaYoVO-2wNyRU_Hs",
+          "mode": "list",
+          "cachedResultName": "Invoice Agent",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18Lg_-ndOHpTRDQ1uaCjU_ku8qhrsaYoVO-2wNyRU_Hs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18Lg_-ndOHpTRDQ1uaCjU_ku8qhrsaYoVO-2wNyRU_Hs/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "VendorName": "={{ $('Information Extractor').item.json.output.vendor_name }}",
+            "InvoiceNumber": "={{ $('Information Extractor').item.json.output.invoice_number }}",
+            "Date ": "={{ $('Information Extractor').item.json.output.date }}",
+            "Amount": "={{ $json.total_amount_inr.toFixed(2) }}",
+            "GST": "={{ $('Code in JavaScript').item.json.total_gst_inr.toFixed(2) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "VendorName",
+              "displayName": "VendorName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "InvoiceNumber",
+              "displayName": "InvoiceNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date ",
+              "displayName": "Date ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Amount",
+              "displayName": "Amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "GST",
+              "displayName": "GST",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1504,
+        480
+      ],
+      "id": "cdb63b35-bb57-4805-83a0-5f766769884c",
+      "name": "Logged into Sheets",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "kRcYBUesFEiXSyTl",
+          "name": "TEST"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1b07b160-bcf2-4337-8e1a-705b37b6a2db",
+              "leftValue": "={{ $json.output.fraud_flag }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        864
+      ],
+      "id": "9f554ed1-2d5f-4c3c-8cdc-f2769f4a2436",
+      "name": "IF fraud_flag == False I"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Information Extractor": {
+      "main": [
+        [
+          {
+            "node": "IF Currency Code != INR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Information Extractor",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Information Extractor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "IF fraud_flag == False",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BillSense Streamlit": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Currency Code != INR": {
+      "main": [
+        [
+          {
+            "node": "Currency Conversion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF fraud_flag == False I",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Currency Conversion": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF fraud_flag == False": {
+      "main": [
+        [
+          {
+            "node": "Logged into Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Data Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF fraud_flag == False I": {
+      "main": [
+        [
+          {
+            "node": "Logged into Sheets I",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Data Summary I",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e8954b6b-bc34-4686-8528-9cbe7fd43bf5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "52f60827830c685e692e7ac1a41f92d4b090b0b114e6156a09cdf67688370a0d"
+  },
+  "id": "Kjs5wpA9JvKeXlds",
+  "tags": []
+}
